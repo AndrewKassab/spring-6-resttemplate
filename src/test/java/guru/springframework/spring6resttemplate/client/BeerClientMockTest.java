@@ -2,6 +2,7 @@ package guru.springframework.spring6resttemplate.client;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import guru.springframework.spring6resttemplate.config.OAuthClientInterceptor;
 import guru.springframework.spring6resttemplate.config.RestTemplateBuilderConfig;
 import guru.springframework.spring6resttemplate.model.BeerDTO;
 import guru.springframework.spring6resttemplate.model.BeerDTOPageImpl;
@@ -11,12 +12,24 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.client.RestClientTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.web.client.MockServerRestTemplateCustomizer;
 import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.security.oauth2.client.InMemoryOAuth2AuthorizedClientService;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
+import org.springframework.security.oauth2.client.registration.ClientRegistration;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository;
+import org.springframework.security.oauth2.core.AuthorizationGrantType;
+import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
@@ -24,6 +37,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.math.BigDecimal;
 import java.net.URI;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.UUID;
 
@@ -31,6 +45,7 @@ import static guru.springframework.spring6resttemplate.client.BeerClientImpl.GET
 import static guru.springframework.spring6resttemplate.client.BeerClientImpl.GET_BEER_PATH;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.*;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
@@ -40,6 +55,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 public class BeerClientMockTest {
 
     static final String URL = "http://localhost:8080";
+    public static final String BEARER_TEST = "Bearer test";
 
     BeerClient beerClient;
 
@@ -51,14 +67,56 @@ public class BeerClientMockTest {
     @Autowired
     ObjectMapper objectMapper;
 
+    @Autowired
+    ClientRegistrationRepository clientRegistrationRepository;
+
     @Mock
     RestTemplateBuilder mockRestTemplateBuilder = new RestTemplateBuilder(new MockServerRestTemplateCustomizer());
 
     BeerDTO dto;
     String dtoJson;
 
+    @MockBean
+    OAuth2AuthorizedClientManager manager;
+
+    @TestConfiguration
+    public static class TestConfig {
+
+        @Bean
+        ClientRegistrationRepository clientRegistrationRepository() {
+            return new InMemoryClientRegistrationRepository(ClientRegistration
+                    .withRegistrationId("springauth")
+                    .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
+                    .clientId("test")
+                    .tokenUri("test")
+                    .build());
+        }
+
+        @Bean
+        OAuth2AuthorizedClientService auth2AuthorizedClientService(
+                ClientRegistrationRepository clientRegistrationRepository) {
+            return new InMemoryOAuth2AuthorizedClientService(clientRegistrationRepository);
+        }
+
+        @Bean
+        OAuthClientInterceptor oAuthClientInterceptor(OAuth2AuthorizedClientManager manager,
+                                                      ClientRegistrationRepository clientRegistrationRepository) {
+            return new OAuthClientInterceptor(manager, clientRegistrationRepository);
+        }
+
+    }
+
     @BeforeEach
     void setUp() throws JsonProcessingException {
+        ClientRegistration clientRegistration = clientRegistrationRepository
+                .findByRegistrationId("springauth");
+
+        OAuth2AccessToken token = new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER,
+                "test", Instant.MIN, Instant.MAX);
+
+        when(manager.authorize(any())).thenReturn(
+                new OAuth2AuthorizedClient(clientRegistration, "test", token));
+
         RestTemplate restTemplate = restTemplateBuilder.build();
         server = MockRestServiceServer.bindTo(restTemplate).build();
         when(mockRestTemplateBuilder.build()).thenReturn(restTemplate);
@@ -73,6 +131,7 @@ public class BeerClientMockTest {
 
         server.expect(method(HttpMethod.GET))
                 .andExpect(requestTo(URL + GET_BEER_PATH))
+                .andExpect(header("Authorization", BEARER_TEST))
                 .andRespond(withSuccess(payload, MediaType.APPLICATION_JSON));
 
         Page<BeerDTO> dtos = beerClient.listBeers();
@@ -101,7 +160,7 @@ public class BeerClientMockTest {
     void testGetBeerById() throws JsonProcessingException {
         mockGetOperation();
 
-        BeerDTO dtoResponse = beerClient.getBeerById(dto.getId().toString());
+        BeerDTO dtoResponse = beerClient.getBeerById(dto.getId());
         assertThat(dtoResponse).isEqualTo(dto);
     }
 
@@ -125,7 +184,7 @@ public class BeerClientMockTest {
                 .andRespond(withResourceNotFound());
 
         assertThrows(HttpClientErrorException.class, () -> {
-            beerClient.deleteBeer(dto.getId().toString());
+            beerClient.deleteBeer(dto.getId());
         });
 
         server.verify();
@@ -137,7 +196,7 @@ public class BeerClientMockTest {
                 .andExpect(requestToUriTemplate(URL + GET_BEER_BY_ID_PATH, dto.getId()))
                 .andRespond(withNoContent());
 
-        beerClient.deleteBeer(dto.getId().toString());
+        beerClient.deleteBeer(dto.getId());
 
         server.verify();
     }

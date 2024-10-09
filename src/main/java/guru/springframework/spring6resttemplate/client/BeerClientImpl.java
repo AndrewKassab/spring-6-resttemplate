@@ -6,12 +6,12 @@ import guru.springframework.spring6resttemplate.model.BeerStyle;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.data.domain.Page;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.util.UUID;
 
 @RequiredArgsConstructor
 @Service
@@ -53,7 +53,7 @@ public class BeerClientImpl implements BeerClient {
     }
 
     @Override
-    public BeerDTO getBeerById(String id) {
+    public BeerDTO getBeerById(UUID id) {
         RestTemplate restTemplate = restTemplateBuilder.build();
 
         return restTemplate.getForObject(GET_BEER_BY_ID_PATH, BeerDTO.class, id);
@@ -73,11 +73,11 @@ public class BeerClientImpl implements BeerClient {
 
         restTemplate.put(GET_BEER_BY_ID_PATH, beerDTO, beerDTO.getId());
 
-        return getBeerById(beerDTO.getId().toString());
+        return getBeerById(beerDTO.getId());
     }
 
     @Override
-    public void deleteBeer(String id) {
+    public void deleteBeer(UUID id) {
         RestTemplate restTemplate = restTemplateBuilder.build();
 
         restTemplate.delete(GET_BEER_BY_ID_PATH, id);
